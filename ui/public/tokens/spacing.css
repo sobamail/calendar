@@ -1,0 +1,34 @@
+/* ============================================================
+   SPACING — tight 2px-based grid for native desktop density.
+   ============================================================ */
+
+:root {
+  --space-0:  0;
+  --space-1:  2px;
+  --space-2:  4px;
+  --space-3:  6px;
+  --space-4:  8px;
+  --space-5:  12px;
+  --space-6:  16px;
+  --space-7:  20px;
+  --space-8:  24px;
+  --space-9:  32px;
+  --space-10: 40px;
+  --space-11: 48px;
+  --space-12: 64px;
+  --space-14: 96px;
+
+  /* Component-scale aliases */
+  --gap-inline:  var(--space-4);  /* icon ↔ label */
+  --gap-stack:   var(--space-5);  /* between rows */
+  --pad-control: var(--space-4) var(--space-6);  /* button padding */
+  --pad-pane:    var(--space-8);  /* content pane inset */
+
+  /* Fixed chrome dimensions (native 3-pane client) */
+  --toolbar-h:    52px;
+  --sidebar-w:    232px;
+  --list-w:       360px;
+  --titlebar-h:   30px;
+  --row-h:        66px;   /* message list row */
+  --statusbar-h:  26px;
+}

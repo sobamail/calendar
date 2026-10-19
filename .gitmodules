@@ -1,0 +1,3 @@
+[submodule ".claude/skills/sobamail-app"]
+	path = .claude/skills/sobamail-app
+	url = https://github.com/sobamail/skill

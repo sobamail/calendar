@@ -1,0 +1,18 @@
+/* Webfonts — Idealist Sans (brand display + UI face)
+   Light (300) and Regular (400) ship; heavier weights are browser-synthesized. */
+
+@font-face {
+  font-family: "Idealist Sans";
+  src: url("/fonts/IdealistSans-Light.ttf") format("truetype");
+  font-weight: 300;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Idealist Sans";
+  src: url("/fonts/IdealistSans-Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
