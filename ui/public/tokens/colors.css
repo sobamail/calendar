@@ -1,0 +1,101 @@
+/* ============================================================
+   COLORS — derived from the brand icon set
+   Signature: light-blue paper (#e1faff) + bold blue stroke (#4180ff),
+   punched with electric green, amber, orange and danger reds.
+   ============================================================ */
+
+:root {
+  /* ---- Blue (primary brand hue) ---- */
+  --blue-50:  #f2fbff;
+  --blue-100: #e1faff;   /* "paper" — envelope/letter fill */
+  --blue-200: #c8efff;
+  --blue-300: #afdaff;   /* mid blue — secondary surfaces */
+  --blue-400: #7aacff;
+  --blue-500: #4180ff;   /* PRIMARY — the brand blue (icon stroke) */
+  --blue-600: #2f63d6;   /* hover */
+  --blue-700: #244aa0;   /* press */
+  --blue-800: #18316d;
+
+  /* ---- Green (go / success / inbox-sent accent) ---- */
+  --green-300: #7dff8c;
+  --green-400: #00ff17;  /* electric — high-energy accent only */
+  --green-500: #00d800;  /* success / confirm */
+  --green-600: #00ad06;
+
+  /* ---- Amber + Orange (outbox / forward / warning) ---- */
+  --amber-400:  #ffc000; /* outbox, pending */
+  --orange-400: #ffa923; /* forward */
+  --orange-500: #ff8a00; /* warning press */
+
+  /* ---- Red (danger / junk / trash) ---- */
+  --red-300: #ff4d4d;    /* junk */
+  --red-400: #ff3607;    /* delete */
+  --red-500: #ff0c4d;    /* trash (magenta-red) */
+  --red-600: #cc0026;
+
+  /* ---- Ink / neutral chrome (native window grays) ---- */
+  --ink-900: #000000;    /* hairline outlines, max contrast */
+  --ink-800: #1a1a1a;
+  --ink-700: #2b2b2b;
+  --ink-600: #4d4d4d;
+  --ink-500: #808080;
+  --ink-400: #acacac;    /* ruled lines, dividers */
+  --ink-300: #cfd4da;
+  --ink-200: #e4e7ea;
+  --ink-150: #eef1f4;
+  --ink-100: #f5f7f9;
+  --white:   #ffffff;
+
+  /* ============================================================
+     SEMANTIC ALIASES
+     ============================================================ */
+
+  /* Brand */
+  --color-primary:        var(--blue-500);
+  --color-primary-hover:  var(--blue-600);
+  --color-primary-press:  var(--blue-700);
+  --color-on-primary:     var(--white);
+
+  --color-go:             var(--green-500);   /* send / confirm */
+  --color-go-hover:       var(--green-600);
+  --color-on-go:          var(--white);
+
+  --color-warning:        var(--amber-400);
+  --color-danger:         var(--red-400);
+  --color-danger-hover:   var(--red-600);
+  --color-on-danger:      var(--white);
+
+  /* Surfaces */
+  --surface-app:      var(--ink-100);   /* window background */
+  --surface-panel:    var(--white);     /* main content panes */
+  --surface-sidebar:  #eaf1fb;          /* folder list (cool tint) */
+  --surface-paper:    var(--blue-100);  /* letter / envelope fill */
+  --surface-raised:   var(--white);     /* cards, popovers */
+  --surface-sunken:   var(--ink-150);   /* wells, inputs at rest */
+  --surface-hover:    rgba(65,128,255,.08);
+  --surface-selected: var(--blue-500);  /* selected list row */
+
+  /* Text */
+  --text-primary:   var(--ink-800);
+  --text-secondary: var(--ink-600);
+  --text-muted:     var(--ink-500);
+  --text-on-paper:  var(--blue-800);
+  --text-on-dark:   var(--white);
+  --text-link:      var(--blue-600);
+
+  /* Borders */
+  --border-subtle:  var(--ink-200);
+  --border-default: var(--ink-300);
+  --border-strong:  var(--blue-500);   /* signature bold-blue outline */
+  --border-ink:     var(--ink-900);    /* hairline ring (icon ring) */
+
+  /* Status / state */
+  --state-unread:   var(--blue-500);
+  --state-flagged:  var(--amber-400);
+  --state-error:    var(--red-400);
+  --state-pending:  var(--amber-400);
+  --state-online:   var(--green-500);
+
+  /* Focus */
+  --focus-ring: 0 0 0 3px rgba(65,128,255,.35);
+}

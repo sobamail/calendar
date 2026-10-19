@@ -1,0 +1,10 @@
+[submodule]
+    recurse = true
+[push]
+    recurseSubmodules = on-demand
+
+#
+# run the following right after clone
+#
+#     git config include.path ../.gitconfig
+#
