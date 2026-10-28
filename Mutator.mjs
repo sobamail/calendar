@@ -11,7 +11,7 @@ import {
     Message,
     MessageAttachment,
     NotFoundError,
-} from "https://sobamail.com/module/base/v1?sha224=FT31A9Ojcmu_lm2HSbwlKpw5FDVqfP2ESNjmrg";
+} from "https://sobamail.com/module/base/v1?sha224=Vj_Th4VBElplcMExD0auypOwjcxuRw7RhvfbaA";
 import {
     AddCalendar,
     AddEvent,

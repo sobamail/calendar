@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/sve
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+    DeleteEvent,
     GetEvent,
     PutCalendar,
     PutCalendarResponse,
@@ -1243,5 +1244,79 @@ describe("views and chrome", () => {
         expect(screen.queryByText(/Synced/)).toBeNull();
         expect(document.querySelector(".titlebar")).toBeNull();
         expect(screen.queryByText("Sobamail — Calendar")).toBeNull();
+    });
+});
+
+describe("realtime updates", () => {
+    // the browser's EventSource on /api/v2/event, which jsdom lacks; announce() is what
+    // the runtime does on a mutation: one event named after its object key
+    class FakeEventSource extends EventTarget {
+        static last: FakeEventSource | null = null;
+        constructor(readonly url: string) {
+            super();
+            FakeEventSource.last = this;
+        }
+        close() {}
+    }
+    const announce = (key: string) =>
+        FakeEventSource.last!.dispatchEvent(
+            new MessageEvent(key, { data: JSON.stringify({ db: "main", replica: "{r}" }) }),
+        );
+    const NS = "{https://sobamail.com/module/calendar/v1}";
+
+    beforeEach(() => vi.stubGlobal("EventSource", FakeEventSource));
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        FakeEventSource.last = null;
+    });
+
+    it("listens on the app event stream", () => {
+        render(App);
+        expect(FakeEventSource.last?.url).toBe("/api/v2/event");
+    });
+
+    it("shows an event written elsewhere once the stream announces it", async () => {
+        render(App);
+        await waitFor(() => expect(backend.fetch).toHaveBeenCalled());
+        put({ title: "From the phone" });
+        await new Promise((r) => setTimeout(r, 100));
+        expect(screen.queryByRole("button", { name: /From the phone/ })).toBeNull();
+
+        announce(`${NS}AddEvent`);
+        await screen.findByRole("button", { name: /From the phone/ });
+    });
+
+    it("drops an event deleted elsewhere, closing its popover", async () => {
+        const uuid = put({ title: "Standup" });
+        const user = userEvent.setup();
+        render(App);
+        await openEvent(user, "Standup");
+        backend.soba.run(new DeleteEvent({ uuid }));
+
+        announce("{https://sobamail.com/module/base/v1}DeleteRow");
+        await waitFor(() => expect(screen.queryByRole("button", { name: /Standup/ })).toBeNull());
+        expect(screen.queryByRole("dialog", { name: "Standup" })).toBeNull();
+    });
+
+    it("shows a calendar added elsewhere", async () => {
+        render(App);
+        await waitFor(() => expect(backend.fetch).toHaveBeenCalled());
+        putCal("Shared work");
+
+        announce(`${NS}AddCalendar`);
+        await screen.findByText("Shared work");
+    });
+
+    it("rereads a burst of announcements once", async () => {
+        render(App);
+        await waitFor(() => expect(backend.fetch).toHaveBeenCalled());
+        await new Promise((r) => setTimeout(r, 100));
+        backend.fetch.mockClear();
+
+        for (const name of ["AddEvent", "SetEventAttr", "AddEventAttr", "AddEventAttrValue"])
+            announce(`${NS}${name}`);
+        await waitFor(() => expect(backend.fetch).toHaveBeenCalledTimes(1));
+        await new Promise((r) => setTimeout(r, 100));
+        expect(backend.fetch).toHaveBeenCalledTimes(1);
     });
 });

@@ -251,6 +251,18 @@ Invariants:
   absent; `weekdayIndex`/`startOfWeek`/`loadWindow` follow it. Ranges use
   `formatRangeToParts` (agenda swaps the separator for " → "); U+2009/U+202F become
   plain spaces. Storage and `ymd` are untouched. Pinned by `lib/locale.test.ts`.
+- Realtime: the store holds one `EventSource` on `/api/v2/event`, the runtime's app
+  event stream (amp-mgui `doc/pub/ref/app-events.md`), which announces every mutation
+  of the instance under its object key — this page's, another page's, a peer
+  replica's. The event tables' insert keys (`AddEvent`, `SetEventAttr`,
+  `AddEventAttr`, `AddEventAttrValue`) reread the window (`load()`), the calendar
+  tables' (`AddCalendar`, `SetCalendarAttr`) the calendars, and base `DeleteRow`
+  (it doesn't say which table) and the stream's `open` both. A burst (a batch arrives
+  as consecutive events) is one reread, 50ms after its first event. A reread keeps a
+  `pendingMove` drop where it was dropped. The writes' own explicit reloads stay:
+  `save()` needs the reloaded event before it opens the popover. No `EventSource`
+  (jsdom) means no stream. Pinned by `App.test.ts` "realtime updates", with a stand-in
+  `EventSource`.
 - svelte-check: 0 errors, 0 warnings.
 
 ## Tests
@@ -300,6 +312,8 @@ runs aren't available headless.
   every replica of a private instance, and that two replicas creating it before their
   first sync write mutations that collapse into one (content addressing). The
   stand-in models no replication, and one device can't show it.
+- The app event stream in the CEF host: that an AddEvent replicated in from a peer
+  reaches the page and the window rereads; jsdom only proves the listeners.
 - Whether the CEF host opens the popover's `<a target="_blank">` Join link in a browser
   or a new window, or swallows it; jsdom only proves the attributes.
 - Export: a `blob:` download is cancelled inside Sobamail (contacts facts "vCard
