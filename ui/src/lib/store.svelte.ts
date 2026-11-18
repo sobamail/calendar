@@ -11,6 +11,8 @@ import {
 import {H1, PALETTE, UNKNOWN_CALENDAR, deepOf} from "./data";
 import {moved, pieceOn, resized, whenText} from "./calendar";
 import type {Placement} from "./calendar";
+import {ContactDirectory} from "./contacts.svelte";
+import {CROSS_RESPONSE, type CrossAnswer, crossTransport} from "./cross";
 import {call_url_ok, email_ok} from "./email";
 import {download, ics_filename, parse_ics, write_ics} from "./ics";
 import type {ImportedEvent} from "./ics";
@@ -29,6 +31,7 @@ import {
     ymd,
 } from "./dates";
 import type {
+    AgendaDay,
     CalendarEvent,
     CalendarForm,
     CalendarId,
@@ -37,7 +40,23 @@ import type {
     EventForm,
     ViewName,
 } from "./types";
+import {namespace} from "$module/calendar/v1";
 import type {Event, EventData} from "$module/calendar/v1";
+
+/**
+ * The app event stream (doc/pub/ref/app-events.md): every mutation written to the
+ * instance — by this page, another page or a peer replica — is announced under its object
+ * key. An event names the mutation, not the row, so a listener rereads.
+ */
+const EVENT_STREAM = "/api/v2/event";
+/** The insert events of the event tables (Mutator.mjs): an event or its attributes changed. */
+const EVENT_KEYS = [ "AddEvent", "SetEventAttr", "AddEventAttr", "AddEventAttrValue" ];
+/** The insert events of the calendar tables. */
+const CALENDAR_KEYS = [ "AddCalendar", "SetCalendarAttr" ];
+/** A row deleted from any table; it doesn't say which, so both are reread. */
+const DELETE_ROW = "{https://sobamail.com/module/base/v1}DeleteRow";
+/** A batch arrives as consecutive events; they are taken in one reread this long after. */
+const STREAM_SETTLE_MS = 50;
 
 /** localStorage key of the calendar visibility: {id: false} for each hidden calendar. */
 const VISIBLE_KEY = "calendar.visible";
@@ -244,12 +263,63 @@ export class CalendarStore {
     /** The account's address, asked for once, on the first invitation. */
     private account = "";
 
+    /** The people of the mailbox's contacts app, for the guest fields to suggest from. */
+    readonly contacts = new ContactDirectory(crossTransport);
+
     constructor() {
         this.load();
         this.loadCalendars();
+        this.listen();
         if (typeof setInterval !== "undefined") {
             setInterval(() => { this.now = new Date(); }, 60000);
         }
+    }
+
+    // ---- Realtime updates --------------------------------------------------
+    /** What the stream said changed since the last reread, and the reread's timer. */
+    private stale = {events : false, calendars : false};
+    private staleTimer: ReturnType<typeof setTimeout>|null = null;
+
+    /**
+     * Follow the app event stream, so a change made on another replica or page shows up
+     * without a reload. The browser reconnects by itself and replays what it missed.
+     */
+    private listen() {
+        if (typeof EventSource === "undefined")
+            return;
+        const stream = new EventSource(EVENT_STREAM);
+        for (const name of EVENT_KEYS)
+            stream.addEventListener(`{${namespace}}${name}`, () => this.markStale(true, false));
+        for (const name of CALENDAR_KEYS)
+            stream.addEventListener(`{${namespace}}${name}`, () => this.markStale(false, true));
+        stream.addEventListener(DELETE_ROW, () => this.markStale(true, true));
+        // the answers to the contacts lookups, which are no mutation of ours
+        stream.addEventListener(CROSS_RESPONSE, (ev) => {
+            try {
+                this.contacts.receive(JSON.parse((ev as MessageEvent).data).content as CrossAnswer);
+            } catch (e) {
+                console.error("Unreadable CrossResponse:", e);
+            }
+        });
+        // whatever was written before the stream (re)opened went unannounced
+        stream.addEventListener("open", () => this.markStale(true, true));
+    }
+
+    /** Reread what the stream said changed, once for a whole burst of events. */
+    private markStale(events: boolean, calendars: boolean) {
+        this.stale.events ||= events;
+        this.stale.calendars ||= calendars;
+        if (this.staleTimer !== null)
+            return;
+        this.staleTimer = setTimeout(() => {
+            const {events, calendars} = this.stale;
+            this.stale = {events : false, calendars : false};
+            this.staleTimer = null;
+            if (events)
+                this.load();
+            if (calendars)
+                this.loadCalendars();
+        }, STREAM_SETTLE_MS);
     }
 
     /** The event being dragged and where it would land; the views show it there. */
@@ -283,6 +353,24 @@ export class CalendarStore {
                 .sort((a, b) => (b.allDay ? 1 : 0) - (a.allDay ? 1 : 0) || a.s - b.s);
     }
 
+    /**
+     * The days from `from` to `last` (both "YYYY-MM-DD", inclusive) that have
+     * visible events, with their pieces; a multi-day event is listed under every
+     * day it covers inside that span.
+     */
+    agendaDays(from: string, last: string): AgendaDay[] {
+        const dates = new Set<string>();
+        for (const e of this.visible) {
+            let d = e.date < from ? parseYmd(from) : parseYmd(e.date);
+            const end = e.endDate < last ? e.endDate : last;
+            for (; ymd(d) <= end; d = addDays(d, 1))
+                dates.add(ymd(d));
+        }
+        return [ ...dates ].sort()
+                .map((date) => ({date, events : this.eventsOn(date)}))
+                .filter((g) => g.events.length > 0);
+    }
+
     // ---- Backend sync ----------------------------------------------------
     /**
      * Load the visible window from the backend (a ±~1-month range around the
@@ -296,7 +384,9 @@ export class CalendarStore {
             const {from, to} = loadWindow(this.cursor);
             const rows = await read_events(from, to, "", PAGE, 0);
             if (seq === this.loadSeq) {
-                this.events = rows.map(toCalendarEvent);
+                // a drop waiting on the guests question stays where it was dropped
+                const p = this.pendingMove;
+                this.events = rows.map(toCalendarEvent).map((e) => (p?.to.id === e.id ? p.to : e));
                 this.capped = rows.length >= PAGE;
             }
         } catch (err) {
@@ -362,6 +452,19 @@ export class CalendarStore {
     goToDay(date: Date) {
         this.cursor = date;
         this.view = "day";
+        this.load();
+    }
+
+    /**
+     * Show "YYYY-MM-DD" `date` in `view` (the shown one when null), as the URL
+     * fragment names them; the window reloads only when the day changed.
+     */
+    showAt(date: string, view: ViewName|null) {
+        if (view)
+            this.view = view;
+        if (date === ymd(this.cursor))
+            return;
+        this.cursor = parseYmd(date);
         this.load();
     }
 

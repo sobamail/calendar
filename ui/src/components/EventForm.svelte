@@ -4,6 +4,7 @@
     import { fmt } from "../lib/calendar";
     import { call_url_ok, email_ok } from "../lib/email";
     import { dialogFocus } from "../lib/dialog";
+    import GuestInput from "./GuestInput.svelte";
 
     const store = useStore();
 
@@ -140,12 +141,12 @@
                     <span>Guests</span>
                     {#each store.form.attendees as _, i}
                         <div class="guest-row">
-                            <input
-                                type="email"
+                            <GuestInput
                                 bind:value={store.form.attendees[i]}
-                                placeholder="name@example.com"
-                                aria-label="Guest {i + 1}"
-                                aria-invalid={!email_ok(store.form.attendees[i])}
+                                contacts={store.contacts}
+                                exclude={store.form.attendees.filter((_, j) => j !== i)}
+                                label="Guest {i + 1}"
+                                invalid={!email_ok(store.form.attendees[i])}
                             />
                             <button
                                 class="ghost remove"

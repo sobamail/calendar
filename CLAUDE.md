@@ -17,3 +17,9 @@
 - In a long running task, proceed by committing any meaningful chunk of work,
   together with its tests if applicable, as you progress through it. Commits
   must not span multiple concerns
+
+- Sessions may run in dontAsk mode, where a Bash call that doesn't match an
+  allow rule in `.claude/settings.json` is denied outright. Write commands the
+  rules can match: one plain command per call, no `cd … &&` chains (and never
+  `cd` outside the project or its additional directories), no heredocs. For a
+  commit message, write it to a scratchpad file and `git commit -F <file>`.

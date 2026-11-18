@@ -1,44 +1,25 @@
 <script lang="ts">
     import { useStore } from "../lib/context";
-    import {
-        addDays,
-        agendaSpan,
-        dayGroupLabel,
-        parseYmd,
-        sameDay,
-        today,
-        ymd,
-    } from "../lib/dates";
+    import { agendaSpan, dayGroupLabel, parseYmd, sameDay, today } from "../lib/dates";
     import { fmt } from "../lib/calendar";
     import type { DayPiece } from "../lib/types";
 
     const store = useStore();
 
     // The events from the start of the cursor's week to the end of the loaded
-    // window, grouped by day; a multi-day event is listed under every day it
-    // covers inside that span.
+    // window, grouped by day.
     const span = $derived(agendaSpan(store.cursor));
     const groups = $derived.by(() => {
-        const { from, last } = span;
         const t = today();
-        const dates = new Set<string>();
-        for (const e of store.visible) {
-            let d = e.date < from ? parseYmd(from) : parseYmd(e.date);
-            const end = e.endDate < last ? e.endDate : last;
-            for (; ymd(d) <= end; d = addDays(d, 1)) dates.add(ymd(d));
-        }
-        return [...dates]
-            .sort()
-            .map((dateStr) => {
-                const d = parseYmd(dateStr);
-                return {
-                    key: dateStr,
-                    label: dayGroupLabel(d),
-                    isToday: sameDay(d, t),
-                    events: store.eventsOn(dateStr),
-                };
-            })
-            .filter((g) => g.events.length > 0);
+        return store.agendaDays(span.from, span.last).map((g) => {
+            const d = parseYmd(g.date);
+            return {
+                key: g.date,
+                label: dayGroupLabel(d),
+                isToday: sameDay(d, t),
+                events: g.events,
+            };
+        });
     });
 
     const edgeText = $derived(

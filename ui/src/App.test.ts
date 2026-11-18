@@ -7,6 +7,7 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/sve
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+    DeleteEvent,
     GetEvent,
     PutCalendar,
     PutCalendarResponse,
@@ -38,6 +39,8 @@ let backend: Backend;
 beforeEach(async () => {
     backend = await install_backend();
     localStorage.clear();
+    // the app keeps its day and view in the fragment; each test opens on today
+    history.replaceState(null, "", "/");
 });
 
 const TODAY = ymd(today());
@@ -52,6 +55,10 @@ const putCal = (name: string, color = "#8e44ad") =>
     backend.soba.run<PutCalendarResponse>(new PutCalendar({ name, color }))!.uuid;
 
 const button = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+// the active view; the sidebar's agenda summary lists the same events again
+const view = () => within(screen.getByRole("main"));
+const summary = () => within(screen.getByRole("region", { name: "Agenda summary" }));
+const openCals = (user: ReturnType<typeof userEvent.setup>) => user.click(button("Calendars"));
 const guestRows = () => screen.queryAllByLabelText(/^Guest \d+$/) as HTMLInputElement[];
 
 async function openForm() {
@@ -69,7 +76,7 @@ async function addGuest(user: ReturnType<typeof userEvent.setup>, address: strin
 }
 
 async function openEvent(user: ReturnType<typeof userEvent.setup>, title: string) {
-    await user.click(await screen.findByRole("button", { name: new RegExp(title) }));
+    await user.click(await view().findByRole("button", { name: new RegExp(title) }));
     return screen.findByRole("dialog", { name: title });
 }
 
@@ -105,7 +112,7 @@ describe("the event form", () => {
         const user = await openForm();
         await user.click(button("Add event"));
 
-        const block = await screen.findByRole("button", { name: /Planning/ });
+        const block = await view().findByRole("button", { name: /Planning/ });
         expect(block.classList.contains("event")).toBe(true);
         expect(block.classList.contains("all-day-chip")).toBe(false);
         const dialog = await openEvent(user, "Planning");
@@ -216,7 +223,7 @@ describe("multi-day events", () => {
         put({ title: "Offsite", start: isoAt(TODAY, 9), end: isoAt(day(2), 17) });
         const user = userEvent.setup();
         render(App);
-        await user.click((await screen.findAllByRole("button", { name: /Offsite/ }))[0]);
+        await user.click((await view().findAllByRole("button", { name: /Offsite/ }))[0]);
         await user.click(button("Edit"));
         expect(dateField("Start date").value).toBe(TODAY);
         expect(dateField("End date").value).toBe(day(2));
@@ -230,7 +237,7 @@ describe("multi-day events", () => {
         const user = userEvent.setup();
         const { container } = render(App);
         await user.click(button("Month"));
-        await screen.findAllByRole("button", { name: /Trip/ });
+        await view().findAllByRole("button", { name: /Trip/ });
 
         const chip = (n: number) => container.querySelector(`.cell[data-date="${day(n)}"] .chip`);
         expect([-1, 0, 1, 2, 3].map((n) => chip(n)?.textContent?.trim() ?? null)).toEqual([
@@ -256,7 +263,7 @@ describe("multi-day events", () => {
         const user = userEvent.setup();
         render(App);
         await user.click(button("Agenda"));
-        const rows = await screen.findAllByRole("button", { name: /Trip/ });
+        const rows = await view().findAllByRole("button", { name: /Trip/ });
         expect(rows.map((r) => r.querySelector(".title")!.textContent!.trim())).toEqual([
             "Trip (day 1 of 3)",
             "Trip (day 2 of 3)",
@@ -268,7 +275,7 @@ describe("multi-day events", () => {
         put({ title: "Offsite", start: isoAt(TODAY, 9), end: isoAt(day(2), 17) });
         const user = userEvent.setup();
         render(App);
-        await user.click((await screen.findAllByRole("button", { name: /Offsite/ }))[0]);
+        await user.click((await view().findAllByRole("button", { name: /Offsite/ }))[0]);
         const dialog = screen.getByRole("dialog", { name: "Offsite" });
         expect(dialog.textContent).toContain(`${longDate(today())}, 9 AM – `);
         expect(dialog.textContent).toContain(`${longDate(addDays(today(), 2))}, 5 PM`);
@@ -293,7 +300,7 @@ describe("the dialogs", () => {
         put({ title: "Standup" });
         const user = userEvent.setup();
         render(App);
-        const chip = await screen.findByRole("button", { name: /Standup/ });
+        const chip = await view().findByRole("button", { name: /Standup/ });
         const dialog = await openEvent(user, "Standup");
         expect(dialog.contains(document.activeElement)).toBe(true);
 
@@ -383,7 +390,7 @@ describe("dragging in the week view", () => {
             ...extra,
         });
         const { container } = render(App);
-        const standup = await screen.findByRole("button", { name: /Standup/ });
+        const standup = await view().findByRole("button", { name: /Standup/ });
         layOut(container);
         await fireEvent.pointerDown(standup, { button: 0, clientX: 50, clientY: 9.1 * HOUR_PX });
         return { uuid, container, standup };
@@ -544,7 +551,7 @@ describe("dragging in the week view", () => {
     it("moves the end by quarter hours from the bottom edge, keeping the start", async () => {
         const uuid = put({ title: "Standup", start: isoAt(week[0], 9), end: isoAt(week[0], 10) });
         const { container } = render(App);
-        await screen.findByRole("button", { name: /Standup/ });
+        await view().findByRole("button", { name: /Standup/ });
         layOut(container);
         const handle = block(container, week[0])!.querySelector(".resize")!;
         await fireEvent.pointerDown(handle, { button: 0, clientX: 50, clientY: 10 * HOUR_PX });
@@ -569,7 +576,7 @@ describe("dragging in the week view", () => {
             end: isoAt(week[2], 23 + 59 / 60),
         });
         const { container } = render(App);
-        const [chip] = await screen.findAllByRole("button", { name: /Trip/ });
+        const [chip] = await view().findAllByRole("button", { name: /Trip/ });
         layOut(container);
         await fireEvent.pointerDown(chip, { button: 0, clientX: 150, clientY: 10 });
         await fireEvent.pointerMove(document, { buttons: 1, clientX: 450, clientY: 300 });
@@ -645,7 +652,7 @@ describe("search", () => {
     it("counts the hits among the shown events, folding accents", async () => {
         const user = userEvent.setup();
         render(App);
-        await screen.findByRole("button", { name: /Dentist/ });
+        await view().findByRole("button", { name: /Dentist/ });
         expect(status()).toBeNull();
 
         await user.type(field(), "sisli");
@@ -655,7 +662,7 @@ describe("search", () => {
     it("says so when nothing in the shown months matches", async () => {
         const user = userEvent.setup();
         render(App);
-        await screen.findByRole("button", { name: /Dentist/ });
+        await view().findByRole("button", { name: /Dentist/ });
         await user.type(field(), "zzz");
         await waitFor(() =>
             expect(status()?.textContent).toBe("no matches in the shown months"),
@@ -665,7 +672,7 @@ describe("search", () => {
     it("clears with the clear button and with Escape", async () => {
         const user = userEvent.setup();
         render(App);
-        await screen.findByRole("button", { name: /Dentist/ });
+        await view().findByRole("button", { name: /Dentist/ });
         await user.type(field(), "lunch");
         await waitFor(() => expect(status()).not.toBeNull());
 
@@ -694,9 +701,43 @@ describe("calendars", () => {
     const options = () =>
         [...(screen.getByLabelText("Calendar") as HTMLSelectElement).options].map((o) => o.text);
 
+    it("lists them only once the sidebar's calendar box is opened", async () => {
+        const user = userEvent.setup();
+        render(App);
+        await waitFor(() => expect(button("Calendars").textContent).toContain("(Calendar)"));
+        expect(button("Calendars").getAttribute("aria-expanded")).toBe("false");
+        expect(screen.queryByRole("button", { name: "Add calendar" })).toBeNull();
+
+        await openCals(user);
+        expect(button("Calendars").getAttribute("aria-expanded")).toBe("true");
+        expect(button("(Calendar)").getAttribute("aria-pressed")).toBe("true");
+        await user.keyboard("{Escape}");
+        expect(screen.queryByRole("button", { name: "(Calendar)" })).toBeNull();
+
+        await openCals(user);
+        await user.click(screen.getByRole("main"));
+        expect(screen.queryByRole("button", { name: "(Calendar)" })).toBeNull();
+    });
+
+    it("names in the closed box what is shown", async () => {
+        putCal("Book club");
+        putCal("Gym");
+        const user = userEvent.setup();
+        render(App);
+        await waitFor(() => expect(button("Calendars").textContent).toContain("All calendars"));
+        await openCals(user);
+        await user.click(button("Gym"));
+        expect(button("Calendars").textContent).toContain("2 of 3 calendars");
+        await user.click(button("(Calendar)"));
+        expect(button("Calendars").textContent).toContain("Book club");
+        await user.click(button("Book club"));
+        expect(button("Calendars").textContent).toContain("No calendars");
+    });
+
     it("creates one from the sidebar; it is listed there and in the event form", async () => {
         const user = userEvent.setup();
         render(App);
+        await openCals(user);
         await user.click(button("Add calendar"));
         expect(calForm().contains(document.activeElement)).toBe(true);
         await user.type(screen.getByLabelText("Name"), "Book club");
@@ -706,6 +747,7 @@ describe("calendars", () => {
         await waitFor(() => expect(storedCals()).toHaveLength(1));
         expect(storedCals()[0].slice(1)).toEqual(["Book club", "#16a085"]);
         expect(screen.queryByRole("dialog", { name: "Calendar form" })).toBeNull();
+        await openCals(user);
         expect(await screen.findByRole("button", { name: "Book club" })).not.toBeNull();
 
         await user.click(screen.getAllByRole("button", { name: /New event/ })[0]);
@@ -715,6 +757,7 @@ describe("calendars", () => {
     it("lists the unnamed primary calendar as (Calendar); a new event goes to it", async () => {
         const user = userEvent.setup();
         render(App);
+        await openCals(user);
         expect(await screen.findByRole("button", { name: "(Calendar)" })).not.toBeNull();
         await user.click(screen.getAllByRole("button", { name: /New event/ })[0]);
         await user.type(screen.getByLabelText("Title"), "Planning");
@@ -729,6 +772,7 @@ describe("calendars", () => {
     it("renames the primary calendar, offering no Delete", async () => {
         const user = userEvent.setup();
         render(App);
+        await openCals(user);
         await user.click(await screen.findByRole("button", { name: "Edit (Calendar)" }));
         expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("");
         expect(screen.queryByRole("button", { name: "Delete calendar" })).toBeNull();
@@ -736,6 +780,7 @@ describe("calendars", () => {
         await user.click(button("Save calendar"));
 
         await waitFor(() => expect(storedCals()).toEqual([[PRIMARY, "Home", "#4180ff"]]));
+        await openCals(user);
         expect(await screen.findByRole("button", { name: "Home" })).not.toBeNull();
         expect(screen.queryByRole("button", { name: "(Calendar)" })).toBeNull();
     });
@@ -754,6 +799,7 @@ describe("calendars", () => {
         const uuid = putCal("Book club");
         const user = userEvent.setup();
         render(App);
+        await openCals(user);
         await user.click(await screen.findByRole("button", { name: "Edit Book club" }));
         expect((screen.getByLabelText("Name") as HTMLInputElement).value).toBe("Book club");
         expect(screen.getByRole("radio", { name: "Purple" }).getAttribute("aria-checked")).toBe(
@@ -765,12 +811,14 @@ describe("calendars", () => {
         await user.click(button("Save calendar"));
 
         await waitFor(() => expect(storedCals()).toEqual([[uuid, "Reading", "#e84393"]]));
+        await openCals(user);
         expect(await screen.findByRole("button", { name: "Reading" })).not.toBeNull();
     });
 
     it("won't create one without a name", async () => {
         const user = userEvent.setup();
         render(App);
+        await openCals(user);
         await user.click(button("Add calendar"));
         expect(button("Create calendar").disabled).toBe(true);
         await user.type(screen.getByLabelText("Name"), "  ");
@@ -781,11 +829,15 @@ describe("calendars", () => {
         putCal("Book club");
         const user = userEvent.setup();
         render(App);
+        await openCals(user);
         await user.click(await screen.findByRole("button", { name: "Edit Book club" }));
         await user.click(button("Delete calendar"));
         await waitFor(() => expect(storedCals()).toHaveLength(0));
         expect(screen.queryByRole("dialog", { name: "Calendar form" })).toBeNull();
-        expect(screen.queryByRole("button", { name: "Book club" })).toBeNull();
+        await openCals(user);
+        await waitFor(() =>
+            expect(screen.queryByRole("button", { name: "Book club" })).toBeNull(),
+        );
     });
 
     it("refuses to delete one events use, and says why", async () => {
@@ -794,6 +846,7 @@ describe("calendars", () => {
         put({ title: "Chapter 2", cal });
         const user = userEvent.setup();
         render(App);
+        await openCals(user);
         await user.click(await screen.findByRole("button", { name: "Edit Book club" }));
         await user.click(button("Delete calendar"));
         expect((await screen.findByRole("alert")).textContent).toBe(
@@ -826,24 +879,27 @@ describe("calendars", () => {
         put({ title: "Standup" });
         const user = userEvent.setup();
         const first = render(App);
-        await screen.findByRole("button", { name: /Standup/ });
+        await view().findByRole("button", { name: /Standup/ });
+        await openCals(user);
         await user.click(await screen.findByRole("button", { name: "(Calendar)" }));
         expect(button("(Calendar)").getAttribute("aria-pressed")).toBe("false");
-        expect(screen.queryByRole("button", { name: /Standup/ })).toBeNull();
+        expect(view().queryByRole("button", { name: /Standup/ })).toBeNull();
+        expect(summary().queryByRole("button", { name: /Standup/ })).toBeNull();
         first.unmount();
 
         render(App);
+        await openCals(user);
         await screen.findByRole("button", { name: "(Calendar)" });
         expect(button("(Calendar)").getAttribute("aria-pressed")).toBe("false");
         await waitFor(() => expect(backend.fetch).toHaveBeenCalled());
-        expect(screen.queryByRole("button", { name: /Standup/ })).toBeNull();
+        expect(view().queryByRole("button", { name: /Standup/ })).toBeNull();
     });
 
     it("starts with every calendar shown when the stored visibility is unreadable", async () => {
         localStorage.setItem("calendar.visible", "{not json");
         put({ title: "Standup" });
         render(App);
-        expect(await screen.findByRole("button", { name: /Standup/ })).not.toBeNull();
+        expect(await view().findByRole("button", { name: /Standup/ })).not.toBeNull();
     });
 });
 
@@ -915,7 +971,7 @@ describe("invitations", () => {
     it("just closes the form after saving an event without guests", async () => {
         const user = await openForm();
         await user.click(button("Add event"));
-        await screen.findByRole("button", { name: /Planning/ });
+        await view().findByRole("button", { name: /Planning/ });
         expect(screen.queryByRole("dialog", { name: "Planning" })).toBeNull();
     });
 
@@ -931,10 +987,10 @@ describe("invitations", () => {
             put({ title: "Review", ...INVITED });
             put({ title: "Mine" });
             render(App);
-            const block = await screen.findByRole("button", { name: /Review/ });
+            const block = await view().findByRole("button", { name: /Review/ });
             expect(block.classList.contains("invitation")).toBe(true);
             expect(block.textContent).toContain("Invitation");
-            const mine = screen.getByRole("button", { name: /Mine/ });
+            const mine = view().getByRole("button", { name: /Mine/ });
             expect(mine.classList.contains("invitation")).toBe(false);
             expect(mine.textContent).not.toContain("Invitation");
         });
@@ -944,11 +1000,11 @@ describe("invitations", () => {
             const user = userEvent.setup();
             render(App);
             await user.click(screen.getByRole("button", { name: "Month" }));
-            const chip = await screen.findByRole("button", { name: /Review/ });
+            const chip = await view().findByRole("button", { name: /Review/ });
             expect(chip.classList.contains("invitation")).toBe(true);
 
             await user.click(screen.getByRole("button", { name: "Agenda" }));
-            const row = await screen.findByRole("button", { name: /Review/ });
+            const row = await view().findByRole("button", { name: /Review/ });
             expect(row.classList.contains("invitation")).toBe(true);
             expect(row.textContent).toContain("Invitation");
         });
@@ -989,7 +1045,7 @@ describe("export and import", () => {
         const files = downloads();
         const user = userEvent.setup();
         render(App);
-        await screen.findByRole("button", { name: /Gym/ });
+        await view().findByRole("button", { name: /Gym/ });
 
         await user.click(button("Export"));
         expect(files.map((f) => f.name)).toEqual(["calendar.ics"]);
@@ -1048,7 +1104,8 @@ describe("export and import", () => {
         const cal = putCal("Book club");
         const user = userEvent.setup();
         render(App);
-        await screen.findByRole("button", { name: "Book club" });
+        // the calendars have loaded once the closed box counts both
+        await waitFor(() => expect(button("Calendars").textContent).toContain("All calendars"));
         await user.upload(
             screen.getByLabelText("iCalendar file to import"),
             new File([ics], "events.ics", { type: "text/calendar" }),
@@ -1168,7 +1225,7 @@ describe("time zones", () => {
         try {
             const user = userEvent.setup();
             render(App);
-            await screen.findByRole("button", { name: /Tokyo call/ });
+            await view().findByRole("button", { name: /Tokyo call/ });
             await user.click(button("Export"));
             const text = await blob!.text();
             const day = TODAY.replace(/-/g, "");
@@ -1205,13 +1262,50 @@ describe("views and chrome", () => {
         const user = userEvent.setup();
         render(App);
         await user.click(button("Agenda"));
-        const rows = await screen.findAllByRole("button", { name: /Crossing/ });
+        const rows = await view().findAllByRole("button", { name: /Crossing/ });
         expect(rows).toHaveLength(2);
         const labels = [...document.querySelectorAll(".agenda .glabel")].map((g) => g.textContent);
         expect(labels[labels.length - 1]).toBe(dayGroupLabel(lastDay));
         expect(screen.getByRole("note", { name: "Agenda edge" }).textContent!.trim()).toBe(
             `Nothing before ${dayGroupLabel(parseYmd(from))} or after ` +
                 `${dayGroupLabel(lastDay)} is listed: move the week with ‹ and ›.`,
+        );
+    });
+
+    it("sums up the agenda from the cursor's day under the mini month, one line each", async () => {
+        const yesterday = ymd(addDays(today(), -1));
+        const tomorrow = ymd(addDays(today(), 1));
+        put({ title: "Before", start: isoAt(yesterday, 9), end: isoAt(yesterday, 10) });
+        put({ title: "Standup", location: "Room 4" });
+        put({ title: "Review", start: isoAt(tomorrow, 9), end: isoAt(tomorrow, 10) });
+        const user = userEvent.setup();
+        render(App);
+        const line = await summary().findByRole("button", { name: /Standup/ });
+        expect(line.textContent).toContain("10 AM");
+        expect(line.textContent).not.toContain("Room 4");
+        expect(summary().getByRole("button", { name: /Review/ })).not.toBeNull();
+        expect(summary().queryByRole("button", { name: /Before/ })).toBeNull();
+        const days = [...document.querySelectorAll(".summary .day")].map((d) => d.textContent);
+        expect(days).toEqual([dayGroupLabel(today()), dayGroupLabel(parseYmd(tomorrow))]);
+
+        await user.click(line);
+        expect(await screen.findByRole("dialog", { name: "Standup" })).not.toBeNull();
+    });
+
+    it("tells an elided summary line in full on hover", async () => {
+        const title = "A very long title that cannot possibly fit in the narrow sidebar";
+        put({ title });
+        render(App);
+        const line = await summary().findByRole("button", { name: /A very long title/ });
+        expect(line.querySelector(".text")!.textContent).toBe(title);
+        expect(line.title).toBe(`10 AM ${title}`);
+    });
+
+    it("says when the summary has nothing coming up", async () => {
+        render(App);
+        await waitFor(() => expect(backend.fetch).toHaveBeenCalled());
+        expect(screen.getByRole("region", { name: "Agenda summary" }).textContent).toContain(
+            "Nothing coming up",
         );
     });
 
@@ -1231,17 +1325,248 @@ describe("views and chrome", () => {
     it("says nothing below the limit", async () => {
         put({ title: "Solo" });
         render(App);
-        await screen.findByRole("button", { name: /Solo/ });
+        await view().findByRole("button", { name: /Solo/ });
         expect(notice()).toBeNull();
     });
 
     it("has no title bar, fake window controls or sync status", async () => {
         put({ title: "Solo" });
         render(App);
-        await screen.findByRole("button", { name: /Solo/ });
+        await view().findByRole("button", { name: /Solo/ });
         expect(document.querySelector(".lights")).toBeNull();
         expect(screen.queryByText(/Synced/)).toBeNull();
         expect(document.querySelector(".titlebar")).toBeNull();
         expect(screen.queryByText("Sobamail — Calendar")).toBeNull();
+    });
+});
+
+describe("realtime updates", () => {
+    // the browser's EventSource on /api/v2/event, which jsdom lacks; announce() is what
+    // the runtime does on a mutation: one event named after its object key
+    class FakeEventSource extends EventTarget {
+        static last: FakeEventSource | null = null;
+        constructor(readonly url: string) {
+            super();
+            FakeEventSource.last = this;
+        }
+        close() {}
+    }
+    const announce = (key: string) =>
+        FakeEventSource.last!.dispatchEvent(
+            new MessageEvent(key, { data: JSON.stringify({ db: "main", replica: "{r}" }) }),
+        );
+    const NS = "{https://sobamail.com/module/calendar/v1}";
+
+    beforeEach(() => vi.stubGlobal("EventSource", FakeEventSource));
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        FakeEventSource.last = null;
+    });
+
+    it("listens on the app event stream", () => {
+        render(App);
+        expect(FakeEventSource.last?.url).toBe("/api/v2/event");
+    });
+
+    it("shows an event written elsewhere once the stream announces it", async () => {
+        render(App);
+        await waitFor(() => expect(backend.fetch).toHaveBeenCalled());
+        put({ title: "From the phone" });
+        await new Promise((r) => setTimeout(r, 100));
+        expect(view().queryByRole("button", { name: /From the phone/ })).toBeNull();
+
+        announce(`${NS}AddEvent`);
+        await view().findByRole("button", { name: /From the phone/ });
+    });
+
+    it("drops an event deleted elsewhere, closing its popover", async () => {
+        const uuid = put({ title: "Standup" });
+        const user = userEvent.setup();
+        render(App);
+        await openEvent(user, "Standup");
+        backend.soba.run(new DeleteEvent({ uuid }));
+
+        announce("{https://sobamail.com/module/base/v1}DeleteRow");
+        await waitFor(() => expect(view().queryByRole("button", { name: /Standup/ })).toBeNull());
+        expect(screen.queryByRole("dialog", { name: "Standup" })).toBeNull();
+    });
+
+    it("shows a calendar added elsewhere", async () => {
+        const user = userEvent.setup();
+        render(App);
+        await waitFor(() => expect(backend.fetch).toHaveBeenCalled());
+        await openCals(user);
+        putCal("Shared work");
+
+        announce(`${NS}AddCalendar`);
+        await screen.findByRole("button", { name: "Shared work" });
+    });
+
+    it("rereads a burst of announcements once", async () => {
+        render(App);
+        await waitFor(() => expect(backend.fetch).toHaveBeenCalled());
+        await new Promise((r) => setTimeout(r, 100));
+        backend.fetch.mockClear();
+
+        for (const name of ["AddEvent", "SetEventAttr", "AddEventAttr", "AddEventAttrValue"])
+            announce(`${NS}${name}`);
+        await waitFor(() => expect(backend.fetch).toHaveBeenCalledTimes(1));
+        await new Promise((r) => setTimeout(r, 100));
+        expect(backend.fetch).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe("guest suggestions from the contacts app", () => {
+    // The host's half, played here: the grant comes from backend.cross, the contacts app's
+    // answers arrive on the event stream, as the host pushes them, then the end of stream.
+    class FakeEventSource extends EventTarget {
+        static last: FakeEventSource | null = null;
+        constructor(readonly url: string) {
+            super();
+            FakeEventSource.last = this;
+        }
+        close() {}
+    }
+    const CARDS = [
+        { firstName: "Ines", lastName: "Duarte", emails: ["ines.duarte@example.com", "ines@duarte.pt"] },
+        { firstName: "Marco", lastName: "Bellini", emails: ["marco@example.com"] },
+    ];
+    const push = (content: object) =>
+        FakeEventSource.last!.dispatchEvent(
+            new MessageEvent("{https://sobamail.com/module/base/v1}CrossResponse", {
+                data: JSON.stringify({ namespace: "https://sobamail.com/module/base/v1", name: "CrossResponse", content }),
+            }),
+        );
+    // the suggestions on screen, by address; the form's selects have options of their own
+    const list = () => screen.queryByRole("listbox", { name: "Contacts" });
+    const options = () => {
+        const l = list();
+        return l ? within(l).queryAllByRole("option").map((o) => o.querySelector(".addr")?.textContent) : [];
+    };
+    const pause = () => new Promise((r) => setTimeout(r, 300));
+
+    beforeEach(() => {
+        vi.stubGlobal("EventSource", FakeEventSource);
+        backend.cross.answer = (id, object) => {
+            const filter = ((object.content as { filter: string }).filter ?? "").toLowerCase();
+            const data = CARDS.filter((p) =>
+                [p.firstName, p.lastName, ...p.emails].some((v) => v.toLowerCase().includes(filter)),
+            );
+            push({
+                id,
+                appId: "contacts.app.sobamail.com",
+                instanceId: "I1",
+                object: { namespace: "https://sobamail.com/module/contacts/v1", name: "GetPeopleResponse", content: { data } },
+            });
+            push({ id, eos: true });
+        };
+    });
+    afterEach(() => {
+        vi.unstubAllGlobals();
+        FakeEventSource.last = null;
+    });
+
+    it("suggests every address of the people matched, and the one picked is saved", async () => {
+        const user = await openForm();
+        await addGuest(user, "ine");
+        await waitFor(() => expect(options()).toEqual(["ines.duarte@example.com", "ines@duarte.pt"]));
+        expect(backend.cross.grants).toEqual(["{https://sobamail.com/module/contacts/v1}GetPeople"]);
+        expect(within(list()!).getAllByRole("option")[0].textContent).toContain("Ines Duarte");
+
+        await user.keyboard("{ArrowDown}{Enter}");
+        expect(guestRows()[0].value).toBe("ines@duarte.pt");
+        expect(screen.queryByRole("listbox")).toBeNull();
+
+        await user.click(button("Add event"));
+        await waitFor(() => expect(stored()).toHaveLength(1));
+        expect(get(stored()[0]).attendees).toEqual(["ines@duarte.pt"]);
+    });
+
+    it("asks for the grant once, and leaves the event's other guests out", async () => {
+        const user = await openForm();
+        await addGuest(user, "marco");
+        await waitFor(() => expect(options()).toEqual(["marco@example.com"]));
+        await user.keyboard("{Enter}");
+
+        await addGuest(user, "e");
+        await waitFor(() => expect(options()).toEqual(["ines.duarte@example.com", "ines@duarte.pt"]));
+        expect(backend.cross.grants).toHaveLength(1);
+    });
+
+    it("closes the list on Escape and keeps the form open", async () => {
+        const user = await openForm();
+        await addGuest(user, "ine");
+        await waitFor(() => expect(options()).toHaveLength(2));
+        await user.keyboard("{Escape}");
+        expect(screen.queryByRole("listbox")).toBeNull();
+        expect(screen.getByRole("dialog", { name: "Event form" })).toBeTruthy();
+    });
+
+    it("suggests nothing for an address typed out", async () => {
+        const user = await openForm();
+        await addGuest(user, "ines@duarte.pt");
+        await pause();
+        expect(screen.queryByRole("listbox")).toBeNull();
+    });
+
+    // The list is laid out against the window, not inside the card that scrolls: its bottom
+    // end stays above the window's bottom edge (8 px clear). jsdom lays nothing out, so the
+    // field's place on screen is stubbed and the list's inline geometry is checked; the
+    // window is jsdom's 768 px high.
+    describe("the list's place on screen", () => {
+        const at = (input: HTMLInputElement, top: number) => {
+            input.getBoundingClientRect = () =>
+                ({ top, bottom: top + 31, left: 392, right: 756, width: 364, height: 31, x: 392, y: top }) as DOMRect;
+        };
+        async function suggestAt(top: number) {
+            const user = await openForm();
+            await user.click(button("Add guest"));
+            const input = guestRows()[0];
+            at(input, top);
+            await user.type(input, "ine");
+            await waitFor(() => expect(options()).toHaveLength(2));
+            return { user, input, list: list()! };
+        }
+        const px = (v: string) => Number(v.replace("px", ""));
+
+        it("opens below the field, under it and as wide", async () => {
+            const { list } = await suggestAt(200);
+            expect(list.style.position).toBe("fixed");
+            expect(px(list.style.top)).toBe(235);
+            expect(px(list.style.left)).toBe(392);
+            expect(px(list.style.width)).toBe(364);
+            expect(px(list.style.maxHeight)).toBe(220);
+        });
+
+        it("ends above the window's bottom edge when the room below is short", async () => {
+            const { list } = await suggestAt(560);
+            expect(px(list.style.top) + px(list.style.maxHeight)).toBeLessThanOrEqual(768 - 8);
+            expect(px(list.style.maxHeight)).toBeGreaterThanOrEqual(160);
+        });
+
+        it("opens above the field when too little room is left below", async () => {
+            const { list } = await suggestAt(650);
+            expect(list.style.top).toBe("");
+            // its bottom end sits 4 px above the field
+            expect(768 - px(list.style.bottom)).toBe(646);
+            expect(px(list.style.maxHeight)).toBe(220);
+        });
+
+        it("follows the field when the card scrolls", async () => {
+            const { input, list } = await suggestAt(200);
+            at(input, 120);
+            // the DOM's Event: this file's `Event` is the calendar module's
+            input.closest(".card")!.dispatchEvent(new globalThis.Event("scroll"));
+            await waitFor(() => expect(px(list.style.top)).toBe(155));
+        });
+    });
+
+    it("suggests nothing once the user denied the grant", async () => {
+        backend.cross.grant = 401;
+        const user = await openForm();
+        await addGuest(user, "ine");
+        await pause();
+        expect(screen.queryByRole("listbox")).toBeNull();
+        expect(backend.cross.requests).toHaveLength(0);
     });
 });

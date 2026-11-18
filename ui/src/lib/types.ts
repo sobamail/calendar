@@ -84,6 +84,12 @@ export interface DayPiece extends CalendarEvent {
     days: number;
 }
 
+/** One day of an agenda list: its "YYYY-MM-DD" and the visible pieces on it. */
+export interface AgendaDay {
+    date: string;
+    events: DayPiece[];
+}
+
 /** An event after column-overlap layout, ready to position in the grid. */
 export interface LaidOutEvent extends CalendarEvent {
     lane: number;

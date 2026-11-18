@@ -34,16 +34,51 @@ const REQUESTS: Record<string, new (content: never) => { process(given: never): 
 // what the Mutator hands in: each request takes the part it needs
 const GIVEN = { ...ERRORS, ...MAIL } as never;
 
-export type Backend = { soba: FakeSoba; fetch: ReturnType<typeof vi.fn> };
+const NS_BASE = "https://sobamail.com/module/base/v1";
+
+type Smc = { namespace: string; name: string; content: object };
+
+// The host's side of cross requests, which never reach the Mutator: the status a GrantRequest
+// answers (the user's yes or no), what the page asked for, and `answer`, called with each
+// accepted request after its 202, where a test plays the handlers' answers on its stream.
+export type CrossHost = {
+    grant: number;
+    grants: string[];
+    requests: { id: string; object: Smc }[];
+    answer?: (id: string, object: Smc) => void;
+};
+
+export type Backend = { soba: FakeSoba; fetch: ReturnType<typeof vi.fn>; cross: CrossHost };
+
+function crossReply(cross: CrossHost, name: string, content: Record<string, never>): Response {
+    if (name === "GrantRequest") {
+        cross.grants.push(content.objectKey);
+        return new Response(null, { status: cross.grant });
+    }
+    if (name === "CrossRequest") {
+        const object = content.object as Smc | undefined;
+        const key = `{${object?.namespace}}${object?.name}`;
+        if (!object || cross.grant !== 200 || !cross.grants.includes(key))
+            return new Response(null, { status: 401 });
+        cross.requests.push({ id: content.id, object });
+        const answer = cross.answer;
+        if (answer) setTimeout(() => answer(content.id, object));
+        return new Response(null, { status: 202 });
+    }
+    return new Response(null, { status: 404 });
+}
 
 /** Installs the stand-in runtime and a fetch that serves /api/v2/object from it. */
 export async function install_backend(): Promise<Backend> {
     const soba = await install_fake_soba();
+    const cross: CrossHost = { grant: 200, grants: [], requests: [] };
     const fetch = vi.fn(async (_url: string, init: RequestInit) => {
         const request = decode(init.body as Uint8Array) as {
+            namespace: string;
             name: string;
             content: never;
         };
+        if (request.namespace === NS_BASE) return crossReply(cross, request.name, request.content ?? {});
         const Request = REQUESTS[request.name];
         if (!Request) return new Response(null, { status: 404 });
 
@@ -64,5 +99,5 @@ export async function install_backend(): Promise<Backend> {
         return new Response(body as unknown as BodyInit);
     });
     globalThis.fetch = fetch as unknown as typeof globalThis.fetch;
-    return { soba, fetch };
+    return { soba, fetch, cross };
 }

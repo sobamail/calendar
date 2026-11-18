@@ -10,13 +10,55 @@
   import EventForm from './components/EventForm.svelte';
   import ImportDialog from './components/ImportDialog.svelte';
   import MoveDialog from './components/MoveDialog.svelte';
+  import { PANES, format_fragment, parse_fragment, type Pane } from './lib/fragment';
 
   const store = new CalendarStore();
   provideStore(store);
+
+  // The fragment (lib/fragment): pane/<pane>[,<pane>] shows the named panes
+  // alone, the rest is the shown day and view. Read before the first render,
+  // so the narrow view never flashes the whole app.
+  let only = $state<Pane[] | null>(null);
+  const panes = $derived(only ?? PANES);
+  const showLeft = $derived(panes.includes('left'));
+  const showRight = $derived(panes.includes('right'));
+
+  function openFragment() {
+    const f = parse_fragment(location.hash);
+    only = f.only;
+    if (f.date) store.showAt(f.date, f.view);
+    // its popover shows once the day's window holds it
+    if (f.event) store.select(f.event);
+    // the mail client's "show events" of a contact: the search box holds the address
+    if (f.search !== null) store.setQuery(f.search);
+  }
+  openFragment();
+
+  // Every move of the day or the view is a history entry, so Back steps back
+  // through them; a fragment without a day (the launch's pane/left, none at
+  // all) is completed in place. The runtime leaves the fragment to the page
+  // (amp-cef zai/page-url-fragment.md); one that doesn't reloads on every
+  // write, see the facts.
+  $effect(() => {
+    const hash = '#' + format_fragment(only, store.cursor, store.view);
+    if (hash === location.hash) return;
+    const url = location.pathname + location.search + hash;
+    // a launch naming an event or a search is consumed in place too: Back never
+    // selects or searches it again
+    const shown = parse_fragment(location.hash);
+    if (shown.date && !shown.event && shown.search === null) history.pushState(null, '', url);
+    else history.replaceState(null, '', url);
+  });
 </script>
 
+<!-- a link opened, or Back/Forward over the entries written above -->
+<svelte:window onhashchange={openFragment} onpopstate={openFragment} />
+
 <div class="app">
-  <Toolbar />
+  <!-- the toolbar drives the shown view, so it goes with the right pane -->
+  {#if showRight}
+    <Toolbar />
+  {/if}
 
   {#if store.capped}
     <div class="notice" role="status" aria-label="Event limit">
@@ -31,17 +73,21 @@
     </div>
   {/if}
 
-  <div class="body">
-    <Sidebar />
-    <main>
-      {#if store.view === 'week' || store.view === 'day'}
-        <TimeGrid />
-      {:else if store.view === 'month'}
-        <MonthGrid />
-      {:else}
-        <Agenda />
-      {/if}
-    </main>
+  <div class="body" class:alone={!showRight}>
+    {#if showLeft}
+      <Sidebar />
+    {/if}
+    {#if showRight}
+      <main>
+        {#if store.view === 'week' || store.view === 'day'}
+          <TimeGrid />
+        {:else if store.view === 'month'}
+          <MonthGrid />
+        {:else}
+          <Agenda />
+        {/if}
+      </main>
+    {/if}
   </div>
 
   <EventPopover />
@@ -92,6 +138,14 @@
     flex: 1;
     display: flex;
     min-height: 0;
+  }
+  /* pane/left: the sidebar alone fills the page */
+  .body.alone :global(.sidebar) {
+    width: auto;
+    flex: 1;
+    min-width: 0;
+    border-right: none;
+    background: var(--surface-panel);
   }
   main {
     flex: 1;

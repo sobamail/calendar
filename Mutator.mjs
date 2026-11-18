@@ -11,7 +11,7 @@ import {
     Message,
     MessageAttachment,
     NotFoundError,
-} from "https://sobamail.com/module/base/v1?sha224=FT31A9Ojcmu_lm2HSbwlKpw5FDVqfP2ESNjmrg";
+} from "https://sobamail.com/module/base/v1?sha224=Vj_Th4VBElplcMExD0auypOwjcxuRw7RhvfbaA";
 import {
     AddCalendar,
     AddEvent,
@@ -43,7 +43,7 @@ const MAIL = {
 export default class Application {
     static id = "calendar.app.sobamail.com";
     static name = "Calendar";
-    static version = "1.0.1.1";
+    static version = "1.2.0.3";
     static objects = new Map([
         // plain mail, for the invitations in it
         [ Message.KEY, false ],

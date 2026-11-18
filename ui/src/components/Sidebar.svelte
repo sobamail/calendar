@@ -9,6 +9,8 @@
         weekdayHeaders,
         ymd,
     } from "../lib/dates";
+    import { narrow, open_full } from "../lib/fragment";
+    import AgendaSummary from "./AgendaSummary.svelte";
 
     const store = useStore();
     // the store's clock ticks, so "today" moves on past midnight
@@ -27,15 +29,141 @@
     function cancelCalendar() {
         if (!store.saving) store.closeCalendar();
     }
+
+    // the calendar picker: a closed box naming what is shown, a menu of the
+    // calendars to show, hide, edit and add
+    let picking = $state(false);
+    let picker = $state<HTMLElement>();
+    const shownCals = $derived(store.calendars.filter((c) => store.isShown(c.id)));
+    const pickerText = $derived.by(() => {
+        const n = shownCals.length;
+        const total = store.calendars.length;
+        if (n === 1) return calendarName(shownCals[0]);
+        if (n === total) return "All calendars";
+        if (n === 0) return "No calendars";
+        return `${n} of ${total} calendars`;
+    });
+
+    function editCalendar(id?: string) {
+        picking = false;
+        store.openCalendar(id);
+    }
 </script>
 
 <svelte:window
     onkeydown={(e) => {
-        if (store.showCalendar && e.key === "Escape") cancelCalendar();
+        if (e.key !== "Escape") return;
+        if (store.showCalendar) cancelCalendar();
+        else picking = false;
+    }}
+    onpointerdown={(e) => {
+        // on pointerdown, not click: a toggle's click can drop its target (the
+        // swatch's check) from the DOM before a click handler here would see it
+        if (picking && !picker?.contains(e.target as Node)) picking = false;
     }}
 />
 
 <aside class="sidebar">
+    <!-- Calendars -->
+    <div class="picker" bind:this={picker}>
+        <button
+            class="combo"
+            aria-label="Calendars"
+            aria-haspopup="true"
+            aria-expanded={picking}
+            onclick={() => (picking = !picking)}
+        >
+            <span class="combo-swatches">
+                {#each shownCals as meta (meta.id)}
+                    <span class="combo-swatch" style:background={meta.color}></span>
+                {/each}
+            </span>
+            <span class="combo-text">{pickerText}</span>
+            <svg viewBox="0 0 12 12" width="10" height="10" fill="none" aria-hidden="true">
+                <path
+                    d="M2.5 4.5 6 8l3.5-3.5"
+                    stroke="currentColor"
+                    stroke-width="1.6"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                />
+            </svg>
+        </button>
+        {#if picking}
+            <div class="cals" role="group" aria-label="Calendars">
+                {#each store.calendars as meta (meta.id)}
+                    {@const on = store.isShown(meta.id)}
+                    <div class="cal-line">
+                        <button
+                            class="cal-row"
+                            aria-pressed={on}
+                            onclick={() => store.toggleCal(meta.id)}
+                        >
+                            <span
+                                class="swatch"
+                                style:border-color={meta.color}
+                                style:background={on ? meta.color : "transparent"}
+                            >
+                                {#if on}
+                                    <svg
+                                        viewBox="0 0 12 12"
+                                        width="11"
+                                        height="11"
+                                        fill="none"
+                                        aria-hidden="true"
+                                    >
+                                        <path
+                                            d="M1.5 6.5 4.5 9.5 10.5 2.5"
+                                            stroke="#fff"
+                                            stroke-width="2.2"
+                                            stroke-linecap="round"
+                                            stroke-linejoin="round"
+                                        />
+                                    </svg>
+                                {/if}
+                            </span>
+                            <span class="cal-name" class:off={!on}>{calendarName(meta)}</span>
+                        </button>
+                        <!-- icons are drawn, not set in a font: the bundled font has no ✎ or ＋,
+                             and a system font can't be counted on -->
+                        <button
+                            class="cal-edit"
+                            aria-label="Edit {calendarName(meta)}"
+                            onclick={() => editCalendar(meta.id)}
+                        >
+                            <svg
+                                viewBox="0 0 16 16"
+                                width="13"
+                                height="13"
+                                fill="none"
+                                aria-hidden="true"
+                            >
+                                <path
+                                    d="M3 13l.8-3.2L11 2.6l2.4 2.4-7.2 7.2zM9.6 4l2.4 2.4"
+                                    stroke="currentColor"
+                                    stroke-width="1.4"
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                />
+                            </svg>
+                        </button>
+                    </div>
+                {/each}
+                <button class="add-cal" onclick={() => editCalendar()}>
+                    <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
+                        <path
+                            d="M6 1.5v9M1.5 6h9"
+                            stroke="currentColor"
+                            stroke-width="1.6"
+                            stroke-linecap="round"
+                        />
+                    </svg>
+                    Add calendar
+                </button>
+            </div>
+        {/if}
+    </div>
+
     <!-- Mini month -->
     <div class="mini">
         <div class="mini-head">
@@ -57,7 +185,14 @@
         {#each weeks as week, wi (wi)}
             <div class="mini-grid">
                 {#each week as d (ymd(d))}
-                    <button class="mini-cell" onclick={() => store.goToDay(d)}>
+                    <button
+                        class="mini-cell"
+                        onclick={() => {
+                            // the narrow view shows no day: the full app, on this one
+                            if (narrow()) open_full(`${ymd(d)}/day`);
+                            else store.goToDay(d);
+                        }}
+                    >
                         <div
                             class="num"
                             class:today={sameDay(d, t)}
@@ -77,73 +212,7 @@
         {/each}
     </div>
 
-    <!-- Calendars -->
-    <div class="cals">
-        <div class="cals-label">My calendars</div>
-        {#each store.calendars as meta (meta.id)}
-            {@const on = store.isShown(meta.id)}
-            <div class="cal-line">
-                <button
-                    class="cal-row"
-                    aria-pressed={on}
-                    onclick={() => store.toggleCal(meta.id)}
-                >
-                    <span
-                        class="swatch"
-                        style:border-color={meta.color}
-                        style:background={on ? meta.color : "transparent"}
-                    >
-                        {#if on}
-                            <svg
-                                viewBox="0 0 12 12"
-                                width="11"
-                                height="11"
-                                fill="none"
-                                aria-hidden="true"
-                            >
-                                <path
-                                    d="M1.5 6.5 4.5 9.5 10.5 2.5"
-                                    stroke="#fff"
-                                    stroke-width="2.2"
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                />
-                            </svg>
-                        {/if}
-                    </span>
-                    <span class="cal-name" class:off={!on}>{calendarName(meta)}</span>
-                </button>
-                <!-- icons are drawn, not set in a font: the bundled font has no ✎ or ＋,
-                     and a system font can't be counted on -->
-                <button
-                    class="cal-edit"
-                    aria-label="Edit {calendarName(meta)}"
-                    onclick={() => store.openCalendar(meta.id)}
-                >
-                    <svg viewBox="0 0 16 16" width="13" height="13" fill="none" aria-hidden="true">
-                        <path
-                            d="M3 13l.8-3.2L11 2.6l2.4 2.4-7.2 7.2zM9.6 4l2.4 2.4"
-                            stroke="currentColor"
-                            stroke-width="1.4"
-                            stroke-linecap="round"
-                            stroke-linejoin="round"
-                        />
-                    </svg>
-                </button>
-            </div>
-        {/each}
-        <button class="add-cal" onclick={() => store.openCalendar()}>
-            <svg viewBox="0 0 12 12" width="12" height="12" fill="none" aria-hidden="true">
-                <path
-                    d="M6 1.5v9M1.5 6h9"
-                    stroke="currentColor"
-                    stroke-width="1.6"
-                    stroke-linecap="round"
-                />
-            </svg>
-            Add calendar
-        </button>
-    </div>
+    <AgendaSummary />
 
     {#if store.showCalendar}
         <div
@@ -235,8 +304,71 @@
         cursor: pointer;
     }
 
+    .picker {
+        position: relative;
+        padding: 12px 12px 0;
+    }
+    .combo {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        width: 100%;
+        padding: 6px 8px;
+        border: 1.5px solid var(--border-default);
+        border-radius: 5px;
+        background: var(--surface-panel);
+        color: var(--text-primary);
+        font-size: 13px;
+        text-align: left;
+    }
+    .combo:hover {
+        border-color: var(--border-strong);
+    }
+    .combo[aria-expanded="true"] {
+        border-color: var(--border-strong);
+        box-shadow: var(--focus-ring);
+    }
+    .combo svg {
+        flex: none;
+        color: var(--text-muted);
+    }
+    .combo-swatches {
+        display: flex;
+        gap: 3px;
+        flex: none;
+        max-width: 44px;
+        overflow: hidden;
+    }
+    .combo-swatch {
+        flex: none;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+    }
+    .combo-text {
+        flex: 1;
+        min-width: 0;
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
+    }
+    .cals {
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 12px;
+        right: 12px;
+        z-index: 20;
+        max-height: 320px;
+        overflow: auto;
+        padding: 6px;
+        background: var(--surface-panel);
+        border: 1px solid var(--border-default);
+        border-radius: 8px;
+        box-shadow: var(--shadow-pop);
+    }
+
     .mini {
-        padding: 14px 14px 12px;
+        padding: 12px 14px 12px;
         border-bottom: 1px solid var(--border-subtle);
     }
     .mini-head {
@@ -325,19 +457,6 @@
         height: 5px;
     }
 
-    .cals {
-        padding: 12px;
-        flex: 1;
-        overflow: auto;
-    }
-    .cals-label {
-        font-size: var(--text-2xs);
-        text-transform: uppercase;
-        letter-spacing: var(--tracking-caps);
-        color: var(--text-muted);
-        margin-bottom: 8px;
-        padding-left: 4px;
-    }
     .cal-row {
         display: flex;
         align-items: center;
@@ -386,6 +505,9 @@
     .cal-name {
         font-size: 13px;
         color: var(--text-primary);
+        overflow: hidden;
+        white-space: nowrap;
+        text-overflow: ellipsis;
     }
     .cal-name.off {
         color: var(--text-muted);

@@ -243,6 +243,19 @@ Invariants:
   1000 rows) shows an "Event limit" status under the toolbar. There is no title bar:
   the toolbar is the app's top row. Pinned by `dates.test.ts` "the agenda span" and
   `App.test.ts` "views and chrome".
+- Sidebar: top to bottom, the calendar box, the mini month, the agenda summary. The
+  box (`button` "Calendars", `aria-expanded`) names what is shown (the one calendar's
+  name, "All calendars", "N of M calendars", "No calendars") and opens a menu of the
+  calendars' show/hide toggles (`aria-pressed`), their "Edit <name>" buttons and "Add
+  calendar"; Escape or a pointerdown outside closes it (pointerdown, since a toggle's
+  click can unmount its own target, the check mark). The summary (region "Agenda
+  summary", `AgendaSummary.svelte`) lists `store.agendaDays(cursor's day,
+  agendaSpan(cursor).last)` — the same day grouping as the agenda — one line per
+  event (dot, start time or "All day", title), elided with an ellipsis; the `title`
+  attribute has it in full. Because the summary repeats the view's events,
+  `App.test.ts` looks for event buttons inside `<main>` (`view()`), and opens the box
+  (`openCals`) before touching calendars. Pinned by `App.test.ts` "calendars" and
+  "views and chrome".
 - Locale: `lib/locale.ts` builds `Intl.DateTimeFormat`s once for `navigator.language`
   (`setLocale(lang?, first?)` rebuilds them); `dates.ts`'s labels,
   `weekdayHeaders("short"|"narrow")` (month grid, mini month) and `calendar.ts` `fmt`
@@ -251,6 +264,93 @@ Invariants:
   absent; `weekdayIndex`/`startOfWeek`/`loadWindow` follow it. Ranges use
   `formatRangeToParts` (agenda swaps the separator for " → "); U+2009/U+202F become
   plain spaces. Storage and `ymd` are untouched. Pinned by `lib/locale.test.ts`.
+- Realtime: the store holds one `EventSource` on `/api/v2/event`, the runtime's app
+  event stream (amp-mgui `doc/pub/ref/app-events.md`), which announces every mutation
+  of the instance under its object key — this page's, another page's, a peer
+  replica's. The event tables' insert keys (`AddEvent`, `SetEventAttr`,
+  `AddEventAttr`, `AddEventAttrValue`) reread the window (`load()`), the calendar
+  tables' (`AddCalendar`, `SetCalendarAttr`) the calendars, and base `DeleteRow`
+  (it doesn't say which table) and the stream's `open` both. A burst (a batch arrives
+  as consecutive events) is one reread, 50ms after its first event. A reread keeps a
+  `pendingMove` drop where it was dropped. The writes' own explicit reloads stay:
+  `save()` needs the reloaded event before it opens the popover. No `EventSource`
+  (jsdom) means no stream. Pinned by `App.test.ts` "realtime updates", with a stand-in
+  `EventSource`.
+- URL fragment (`lib/fragment.ts`, the precedent for Contacts):
+  `[pane/<pane>[,<pane>]/]<YYYY-MM-DD>[/<view>]`. `pane/` (the mail client's side bar
+  launches `#pane/left`; `left` the sidebar, `right` the toolbar and the view) shows
+  the named panes alone, the sidebar then filling the page; an unknown pane voids the
+  whole fragment (every pane, no state). The rest is the cursor's day and the view,
+  both ways: `App.svelte` applies a fragment on load, `hashchange` and `popstate`
+  (`store.showAt`, reloading only when the day changed), and an `$effect` writes
+  `format_fragment(only, cursor, view)` back, keeping `pane/`. A fragment without a
+  day (none, `#pane/left`) is completed with `replaceState`; a move from one day/view
+  to another is a `pushState`, so Back steps through them. A malformed day (Feb 30,
+  unpadded) or view is no state. Tests reset the URL in `beforeEach`, since jsdom keeps
+  it across tests. Pinned by `lib/fragment.test.ts` and `App.panes.test.ts`.
+  - `/event/<id>` after the view (the id percent-encoded, `event_fragment`; owner
+    2026-10-28: "add an event fragment to the calendar") selects that event, its
+    popover showing once the day's window holds it. A launch item: the store keeps no
+    event, so the fragment written back drops it, with `replaceState` (Back never
+    selects it again). A malformed event (missing, empty, bad percent-encoding, more
+    parts) is no state. The side bar's narrow view (`pane/` without `right`) opens it:
+    an agenda summary click `window.open`s `#<day>/day/event/<id>`, a mini calendar
+    day `#<day>/day`, which the mail client opens in its tab of the app.
+  - `/search/<text>` in the event's place (the text percent-encoded, `search_fragment`)
+    fills the toolbar's search box with the text (`store.setQuery`), so the view shows
+    what matches it; a launch item like the event, dropped from the fragment written
+    back with `replaceState`. The mail client's contact view ("Show events" on its
+    banner, amp-mgui `MsgMainWindow::calendar_search_fragment`) launches
+    `#<today>/agenda/search/<address>`: `GetEvents`' filter matches guests, so the
+    contact's events stand out, the rest dimmed. An empty or malformed text, or a
+    third part, is no state. Pinned by `lib/fragment.test.ts` "search_fragment" and
+    `App.panes.test.ts` "the search fragment".
+  - **Needs a runtime that leaves the fragment to the page.** Sobamail Desktop up to
+    5.4.0.17052 compared the main frame's URL with the launch URL byte for byte at load
+    end and loaded the launch URL over any difference (`W| URL override
+    '…#2026-10-28/week'=>'…'`). The write-back runs before the load event, so that
+    reload came on every load, aborted the loads in flight (`Couldn't load events:
+    TypeError: Failed to fetch`, same for calendars), and the fresh page wrote the
+    fragment again: a loop that flooded the log until the page ended on
+    `chrome-error://`. Fixed in amp-cef (`CefClientImpl::is_same_page`, commit
+    3982289, 2026-10-28; `zai/page-url-fragment.md` there): a fragment-only
+    difference is no override. The interim app-side gate (`url_holds_state()`, no
+    write under the `soba:` scheme, commit 76db918) was removed with that fix.
+- **Guest suggestions from the contacts app.** Each guest row of the event form is
+  `components/GuestInput.svelte`: as the user types, it looks the text up in the mailbox's
+  contacts app over a cross request (amp-mgui `doc/pub/ref/cross-requests.md`) and lists
+  every address of the people found, the event's other guests left out. Arrows move,
+  Enter/Tab take the highlighted one, Escape closes the list and stops there (the form's
+  window-level Escape would cancel the form). A whole address typed out looks nothing up.
+  - Nothing of it is in the backend: the host answers `GrantRequest` and `CrossRequest`;
+    contacts lists `GetPeople`. `lib/cross.ts` posts them; `lib/contacts.svelte.ts`
+    (`ContactDirectory`, `store.contacts`) does the rest; the store's one `EventSource`
+    hands each `{base}CrossResponse` event's `content` to `contacts.receive()`. Both
+    files are soba-chat's (`ui/src/api/cross.ts`, `ui/src/model/contacts.svelte.ts`),
+    which built the same first: a change to one is made to both.
+  - The grant is asked for on the first keystroke in a guest row, never on load; while the
+    host's banner stands the list says to answer it in the bar above. 200 holds for the
+    page's life, 401 too (no more banners until a reload), 404 hides the feature.
+  - The host runs an instance's cross requests one at a time, keeps five waiting, refuses
+    one more with 429 and keeps refusing until a request of the instance ends with its end
+    of stream. So one request of ours is at the host at a time: a newer lookup waits for it
+    to end (its `eos`, or 5 s) and replaces any lookup already waiting, so only the newest
+    query is sent. After a 429 nothing is sent until an `eos` of any id arrives (another
+    page of the instance counts) or 5 s pass; the refused lookup goes again, up to four
+    sends. A lookup the host failed (or gave up) clears the list.
+  - The list is laid out against the window (`position: fixed`, `placeList()`), not in
+    the card, which scrolls (`overflow: auto`) and would clip it: below the field and as
+    wide, its height at most 220 px and capped so its bottom end stays 8 px clear of the
+    window's bottom edge; with less than 160 px left below and more above, it opens above
+    the field. It follows the field on any scroll (the window listens in the capture phase,
+    a scroll does not bubble) and on resize. This holds only while no ancestor of the form
+    has a `transform`, `filter` or `contain`, which would make that ancestor the containing
+    block. Live: below a first guest row the list ran past the card's bottom edge, whole;
+    on a fifth row low in the window it opened above the field. Pinned by `App.test.ts`
+    "the list's place on screen", which stubs the field's rect (jsdom lays nothing out).
+  - Live (Desktop 5.4.0.17246): the banner came up on the first keystroke; after "Always
+    Allow" the installed contacts app's people came back, a second row left the first
+    row's address out, and a burst of three lookups ended on the newest one's answer.
 - svelte-check: 0 errors, 0 warnings.
 
 ## Tests
@@ -267,7 +367,12 @@ turned back on), outside it (`read_invitations` called directly) it reads live;
 exports stand-in base-module classes for what the Mutator hands in (`NotFoundError`
 as `ERRORS`; `FakeMessage`, `FakeAttachment` as `MAIL`). `ui/src/test/backend.ts` is
 the fetch stub for jsdom UI tests; it refuses a request carrying a boolean, passes
-`{...ERRORS, ...MAIL}` to every request and answers a throw with reply key 2. Files:
+`{...ERRORS, ...MAIL}` to every request and answers a throw with reply key 2. It plays the
+host for the base namespace's `GrantRequest`/`CrossRequest`: `cross.grant` is the user's
+answer, `cross.requests` what was sent, and `cross.answer(id, object)`, when set, is called
+after each 202, where a test pushes the contacts app's answers on its fake `EventSource`
+(`App.test.ts` "guest suggestions from the contacts app"). `lib/contacts.test.ts` drives
+the directory on a scripted host, the 429 queue included. Files:
 `test/harness.test.ts`, `lib/dates.test.ts`, `lib/calendar.test.ts` (`fmt(24)` is
 "12 AM"), `lib/model.test.ts`, `lib/calendar-backend.test.ts`, `lib/email.test.ts`,
 `lib/ics.test.ts`, `lib/invite.test.ts`, `lib/invite-in.test.ts`,
@@ -300,6 +405,8 @@ runs aren't available headless.
   every replica of a private instance, and that two replicas creating it before their
   first sync write mutations that collapse into one (content addressing). The
   stand-in models no replication, and one device can't show it.
+- The app event stream in the CEF host: that an AddEvent replicated in from a peer
+  reaches the page and the window rereads; jsdom only proves the listeners.
 - Whether the CEF host opens the popover's `<a target="_blank">` Join link in a browser
   or a new window, or swallows it; jsdom only proves the attributes.
 - Export: a `blob:` download is cancelled inside Sobamail (contacts facts "vCard
